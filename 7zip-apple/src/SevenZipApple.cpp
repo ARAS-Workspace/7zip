@@ -659,6 +659,12 @@ int32_t sevenzip_delete(const char *archive, const char *const *items, size_t it
     });
 }
 
+void sevenzip_set_code_pages(uint32_t oem, uint32_t ansi)
+{
+    g_OemCodePage = oem;
+    g_AnsiCodePage = ansi;
+}
+
 const char *sevenzip_last_error(void)
 {
     return g_lastError.c_str();

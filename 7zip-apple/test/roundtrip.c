@@ -2,7 +2,8 @@
 // archives this test creates itself.
 //
 //   clang -I7zip-apple/include 7zip-apple/test/roundtrip.c \
-//         7zip-apple/build/<arch>/lib7zip_apple.a -lc++ -o roundtrip && ./roundtrip
+//         7zip-apple/build/<arch>/lib7zip_apple.a -lc++ -framework CoreFoundation \
+//         -o roundtrip && ./roundtrip
 
 #include "7zip_apple.h"
 
@@ -105,6 +106,45 @@ static bool count_progress(void *context, uint64_t completed, uint64_t total)
     (void)completed; (void)total;
     (*(int *)context)++;
     return false;
+}
+
+static unsigned long crc32_of(const char *data, size_t size)
+{
+    unsigned long crc = 0xFFFFFFFFul;
+    for (size_t i = 0; i < size; i++) {
+        crc ^= (unsigned char)data[i];
+        for (int bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ (0xEDB88320ul & (0ul - (crc & 1)));
+    }
+    return ~crc & 0xFFFFFFFFul;
+}
+
+static void put16(unsigned char **p, unsigned long v) { *(*p)++ = v & 0xFF; *(*p)++ = (v >> 8) & 0xFF; }
+static void put32(unsigned char **p, unsigned long v) { put16(p, v & 0xFFFF); put16(p, v >> 16); }
+
+/* A ZIP of stored files as Windows' built-in zip writes it: no UTF-8 flag and
+   no Unicode extra field, each name in the bytes given, each file holding its
+   own name. host is the "made by" system: 0 FAT, 3 Unix, 14 VFAT. */
+static void write_windows_zip(const char *name, const char *const *names, const unsigned *host, int count)
+{
+    static unsigned char zip[4096], central[2048];
+    unsigned char *p = zip, *c = central;
+    for (int i = 0; i < count; i++) {
+        const size_t size = strlen(names[i]);
+        const unsigned long crc = crc32_of(names[i], size), offset = (unsigned long)(p - zip);
+        put32(&p, 0x04034b50); put16(&p, 20); put16(&p, 0); put16(&p, 0); put16(&p, 0x6000); put16(&p, 0x5B4D);
+        put32(&p, crc); put32(&p, size); put32(&p, size); put16(&p, size); put16(&p, 0);
+        memcpy(p, names[i], size); p += size;
+        memcpy(p, names[i], size); p += size;
+        put32(&c, 0x02014b50); put16(&c, (host[i] << 8) | 20); put16(&c, 20); put16(&c, 0); put16(&c, 0);
+        put16(&c, 0x6000); put16(&c, 0x5B4D); put32(&c, crc); put32(&c, size); put32(&c, size);
+        put16(&c, size); put16(&c, 0); put16(&c, 0); put16(&c, 0); put16(&c, 0); put32(&c, 0x20); put32(&c, offset);
+        memcpy(c, names[i], size); c += size;
+    }
+    const unsigned long central_offset = (unsigned long)(p - zip), central_size = (unsigned long)(c - central);
+    memcpy(p, central, central_size); p += central_size;
+    put32(&p, 0x06054b50); put16(&p, 0); put16(&p, 0); put16(&p, count); put16(&p, count);
+    put32(&p, central_size); put32(&p, central_offset); put16(&p, 0);
+    write_file(name, (const char *)zip, (size_t)(p - zip));
 }
 
 static SevenZipUpdateOptions options(const char *format)
@@ -277,6 +317,40 @@ int main(void)
         make_dir("outvol");
         EXPECT(sevenzip_extract(path("vol.7z.001"), path("outvol"), NULL, 0, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
         CHECK(same_file("src/sub/b.bin", "outvol/sub/b.bin"), "volume b.bin differs\n");
+    }
+
+    // zip from Turkish Windows: names in CP857 (OEM, FAT host) and CP1254 (ANSI, VFAT host), beside a UTF-8
+    // name without the flag (Unix host)
+    {
+        const char *names[] = { "\x9Eirket Raporu.txt", "A\xA7ustos \x99zetleri/\x98\x87" "erik \x8D\x9F\x8Dk.txt",
+                                "\xDEube.txt", "Unix \xC5\x9F" "ark\xC4\xB1.txt" };
+        const unsigned hosts[] = { 0, 0, 14, 3 };
+        write_windows_zip("windows.zip", names, hosts, 4);
+
+        SevenZipListing *listing = NULL;
+        EXPECT(listed("windows.zip", NULL, NULL, &listing), SEVENZIP_OK);
+        CHECK(has_item(listing, "\xEE\xBE\x9Eirket Raporu.txt"), "by default a CP857 name is not read as 7zz reads it\n");
+        CHECK(has_item(listing, "Unix şarkı.txt"), "a UTF-8 name without the flag is not UTF-8\n");
+        sevenzip_listing_free(listing);
+
+        sevenzip_set_code_pages(857, 1254);
+        EXPECT(listed("windows.zip", NULL, NULL, &listing), SEVENZIP_OK);
+        CHECK(has_item(listing, "Şirket Raporu.txt"), "the OEM name is not read in CP857\n");
+        CHECK(has_item(listing, "Ağustos Özetleri/İçerik ışık.txt"), "the OEM path is not read in CP857\n");
+        CHECK(has_item(listing, "Şube.txt"), "the ANSI name is not read in CP1254\n");
+        CHECK(has_item(listing, "Unix şarkı.txt"), "a UTF-8 name without the flag is read in a code page\n");
+        sevenzip_listing_free(listing);
+        make_dir("outcp");
+        EXPECT(sevenzip_extract(path("windows.zip"), path("outcp"), NULL, 0, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        CHECK(exists("outcp/Şirket Raporu.txt") && exists("outcp/Ağustos Özetleri/İçerik ışık.txt")
+              && exists("outcp/Şube.txt") && exists("outcp/Unix şarkı.txt"), "extracted names are not the listed ones\n");
+        make_dir("outcpsel");
+        const char *only[] = { "Ağustos Özetleri" };
+        EXPECT(sevenzip_extract(path("windows.zip"), path("outcpsel"), only, 1, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        CHECK(exists("outcpsel/Ağustos Özetleri/İçerik ışık.txt") && !exists("outcpsel/Şube.txt"),
+              "selected extraction by a CP857 name took the wrong items\n");
+        EXPECT(sevenzip_test(path("windows.zip"), NULL, NULL), SEVENZIP_OK);
+        sevenzip_set_code_pages(0, 0);
     }
 
     // Failures

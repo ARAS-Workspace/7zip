@@ -146,6 +146,19 @@ int32_t sevenzip_delete(
 );
 
 /* ═══════════════════════════════════════════════════════════════
+ * Names in a Windows code page
+ * ═══════════════════════════════════════════════════════════════ */
+
+/* ZIP archives made on Windows may store names in the system's code page
+   instead of UTF-8: the OEM one (857 on Turkish Windows) for names that FAT,
+   NTFS and Unix hosts wrote, the ANSI one (1254) for the others. macOS has
+   no such code page, so the caller says which ones to read them with. 0, the
+   default, reads them as 7zz on macOS does: bytes that are not UTF-8 become
+   U+EF80…U+EFFF. A name that is valid UTF-8 stays UTF-8. Applies to the calls
+   that start after it; never call it while one runs. */
+void sevenzip_set_code_pages(uint32_t oem, uint32_t ansi);
+
+/* ═══════════════════════════════════════════════════════════════
  * Diagnostics
  * ═══════════════════════════════════════════════════════════════ */
 

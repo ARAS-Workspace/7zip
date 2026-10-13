@@ -45,7 +45,7 @@ for slice in "${SLICES[@]}"; do
     test_bin="${BUILD}/roundtrip-${clang_arch}"
     clang -arch "${clang_arch}" -Wall -Wextra -Werror \
         -I"${SCRIPT_DIR}/include" "${SCRIPT_DIR}/test/roundtrip.c" \
-        "${BUILD}/universal/lib7zip_apple.a" -lc++ -o "${test_bin}"
+        "${BUILD}/universal/lib7zip_apple.a" -lc++ -framework CoreFoundation -o "${test_bin}"
     if arch "-${clang_arch}" /usr/bin/true 2>/dev/null; then
         echo "▸ Testing ${clang_arch}"
         TMPDIR="${BUILD}" arch "-${clang_arch}" "${test_bin}"
