@@ -107,4 +107,16 @@ bool IsNativeUTF8();
 extern bool g_ForceToUTF8;
 #endif
 
+#ifdef __APPLE__
+/* macOS has no OEM or ANSI code page of its own. Names stored in one (ZIP
+   archives made on Windows) are read with the code pages set here, as Windows
+   reads them with the system's; 0 leaves such names to g_ForceToUTF8. */
+extern UINT g_OemCodePage;
+extern UINT g_AnsiCodePage;
+/* src in codePage (CP_OEMCP and CP_ACP stand for the code pages above), read
+   through CoreFoundation. false, and dest untouched, when there is no such
+   code page or src is not in it. */
+bool CodePageToUnicodeString(UString &dest, const AString &src, UINT codePage);
+#endif
+
 #endif

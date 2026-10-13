@@ -17,6 +17,10 @@
 #include <locale.h>
 #endif
 
+#ifdef __APPLE__
+#include <CoreFoundation/CFString.h>
+#endif
+
 static const char k_DefultChar = '_';
 
 #ifdef _WIN32
@@ -759,4 +763,36 @@ void MY_SetLocale()
     // assume LC_CTYPE="C"
   #endif
 }
+#endif
+
+#ifdef __APPLE__
+
+UINT g_OemCodePage = 0;
+UINT g_AnsiCodePage = 0;
+
+bool CodePageToUnicodeString(UString &dest, const AString &src, UINT codePage)
+{
+  if (codePage == CP_OEMCP)
+    codePage = g_OemCodePage;
+  else if (codePage == CP_ACP)
+    codePage = g_AnsiCodePage;
+  if (codePage == 0 || codePage == CP_UTF8)
+    return false;
+  const CFStringEncoding encoding = CFStringConvertWindowsCodepageToEncoding(codePage);
+  if (encoding == kCFStringEncodingInvalidId)
+    return false;
+  CFStringRef s = CFStringCreateWithBytes(kCFAllocatorDefault,
+      (const UInt8 *)src.Ptr(), (CFIndex)src.Len(), encoding, false);
+  if (!s)
+    return false;
+  // UString keeps UTF-16 units, as MultiByteToUnicodeString2() does
+  const CFIndex len = CFStringGetLength(s);
+  wchar_t *d = dest.GetBuf((unsigned)len);
+  for (CFIndex i = 0; i < len; i++)
+    d[i] = (wchar_t)CFStringGetCharacterAtIndex(s, i);
+  dest.ReleaseBuf_SetEnd((unsigned)len);
+  CFRelease(s);
+  return true;
+}
+
 #endif
