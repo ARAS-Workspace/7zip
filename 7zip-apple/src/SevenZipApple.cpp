@@ -166,6 +166,8 @@ static HRESULT ExtractWith(CReporter &reporter, bool test, const UString &archiv
     UStringVector switches;
     switches.Add(test ? L"t" : L"x");
     switches.Add(L"-y");
+    // Names are matched as they are written: "a*.txt" is that one item, not a wildcard
+    switches.Add(L"-spd");
     if (!test)
     {
         switches.Add(mode);
@@ -614,6 +616,7 @@ int32_t sevenzip_update(const char *archive, const char *const *sources, size_t 
         UStringVector switches;
         switches.Add(L"a");
         switches.Add(L"-y");
+        switches.Add(L"-spd");
         switches.Add(UString(L"-t") + Wide(options->format));
         if (options->level >= 0)
         {
@@ -651,6 +654,7 @@ int32_t sevenzip_delete(const char *archive, const char *const *items, size_t it
         UStringVector switches;
         switches.Add(L"d");
         switches.Add(L"-y");
+        switches.Add(L"-spd");
         AddPassword(switches, password);
         if (password && encrypt_headers)
             switches.Add(L"-mhe=on");

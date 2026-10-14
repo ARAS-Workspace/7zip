@@ -353,6 +353,37 @@ int main(void)
         sevenzip_set_code_pages(0, 0);
     }
 
+    // Names with "*" and "?" in them name one item each, never the items they would match as wildcards
+    {
+        make_dir("wild");
+        write_file("wild/a*.txt", "1", 1);
+        write_file("wild/a1.txt", "2", 1);
+        write_file("wild/b?.txt", "3", 1);
+        write_file("wild/bx.txt", "4", 1);
+        SevenZipUpdateOptions o = options("zip");
+        uint32_t count = 0;
+        SevenZipListing *listing = NULL;
+        const char *star[] = { path("wild/a*.txt") };
+        EXPECT(sevenzip_update(path("wild.zip"), star, 1, &o, NULL), SEVENZIP_OK);
+        EXPECT(listed("wild.zip", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 1 && has_item(listing, "a*.txt"), "adding a*.txt added %u items\n", count);
+        sevenzip_listing_free(listing);
+        const char *rest[] = { path("wild/a1.txt"), path("wild/b?.txt"), path("wild/bx.txt") };
+        EXPECT(sevenzip_update(path("wild.zip"), rest, 3, &o, NULL), SEVENZIP_OK);
+
+        make_dir("outwild");
+        const char *one[] = { "a*.txt" };
+        EXPECT(sevenzip_extract(path("wild.zip"), path("outwild"), one, 1, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        CHECK(exists("outwild/a*.txt") && !exists("outwild/a1.txt"), "extracting a*.txt took a1.txt too\n");
+
+        const char *gone[] = { "a*.txt", "b?.txt" };
+        EXPECT(sevenzip_delete(path("wild.zip"), gone, 2, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("wild.zip", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 2 && has_item(listing, "a1.txt") && has_item(listing, "bx.txt"),
+              "deleting a*.txt and b?.txt left %u items\n", count);
+        sevenzip_listing_free(listing);
+    }
+
     // Failures
     EXPECT(listed("src/a.txt", NULL, NULL, NULL), SEVENZIP_ERR_NOT_ARCHIVE);
     {

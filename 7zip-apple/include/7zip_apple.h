@@ -16,7 +16,8 @@
  * password never appears in any process's argument list.
  *
  * Every call is synchronous; run it off the main thread. Strings are UTF-8,
- * paths are absolute.
+ * paths are absolute. Names are matched as they are written (7zz -spd):
+ * "*" and "?" are characters of a name, never wildcards.
  */
 
 #ifdef __cplusplus
