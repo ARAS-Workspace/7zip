@@ -38,6 +38,8 @@ extern "C" {
 #define SEVENZIP_ERR_DATA                -7   /* CRC, data or headers error in the archive */
 #define SEVENZIP_ERR_NO_MEMORY           -8
 #define SEVENZIP_ERR_FAILED              -9   /* anything else; see sevenzip_last_error() */
+#define SEVENZIP_ERR_NOT_FOUND          -10   /* sevenzip_rename: a name matches no item */
+#define SEVENZIP_ERR_EXISTS             -11   /* sevenzip_rename: a new path is taken */
 
 /* ═══════════════════════════════════════════════════════════════
  * Extraction overwrite policy (7zz -aoa / -aou / -aos)
@@ -114,7 +116,7 @@ int32_t sevenzip_extract(
 int32_t sevenzip_test(const char *archive, const char *password, const SevenZipCallbacks *callbacks);
 
 /* ═══════════════════════════════════════════════════════════════
- * Create, add and delete (7zz a / d)
+ * Create, add, delete and rename (7zz a / d / rn)
  * ═══════════════════════════════════════════════════════════════ */
 typedef struct {
     const char *format;          /* -t: "7z", "zip", "tar", "gzip", "xz", "bzip2" */
@@ -143,6 +145,27 @@ int32_t sevenzip_delete(
     size_t                   item_count,
     const char              *password,
     bool                     encrypt_headers,
+    const SevenZipCallbacks *callbacks
+);
+
+/* Renames items (7zz rn): pairs holds pair_count pairs, each the path of an
+   item inside the archive and its new path, "a.txt", "docs/a.txt". A folder
+   is renamed with everything under it, so a new path in another folder moves
+   the item there. The archive is listed first and nothing is written when
+   a name matches no item (SEVENZIP_ERR_NOT_FOUND), a new path is taken by an
+   item that stays or is a file's path inside another file
+   (SEVENZIP_ERR_EXISTS), a path is not one inside an archive (empty, "/" at
+   either end, a "." or ".." part), a folder would go inside itself, two
+   items would get one path or two pairs name one item
+   (SEVENZIP_ERR_INVALID_PARAM), or the archive is a compressed tar or in
+   volumes (SEVENZIP_ERR_UNSUPPORTED); sevenzip_last_error() names the item.
+   Like every change, the archive is written anew next to the old one; one
+   whose names are encrypted keeps them encrypted. */
+int32_t sevenzip_rename(
+    const char              *archive,
+    const char *const       *pairs,
+    size_t                   pair_count,
+    const char              *password,
     const SevenZipCallbacks *callbacks
 );
 

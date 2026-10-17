@@ -382,6 +382,99 @@ int main(void)
         CHECK(count == 2 && has_item(listing, "a1.txt") && has_item(listing, "bx.txt"),
               "deleting a*.txt and b?.txt left %u items\n", count);
         sevenzip_listing_free(listing);
+
+        // Renamed by names with wildcard characters, old and new
+        const char *wildNew[] = { "a1.txt", "x?.txt" };
+        EXPECT(sevenzip_rename(path("wild.zip"), wildNew, 1, NULL, NULL), SEVENZIP_OK);
+        const char *wildOld[] = { "x?.txt", "y.txt" };
+        EXPECT(sevenzip_rename(path("wild.zip"), wildOld, 1, NULL, NULL), SEVENZIP_OK);
+        EXPECT(listed("wild.zip", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 2 && has_item(listing, "y.txt") && has_item(listing, "bx.txt"), "renaming by wildcard names\n");
+        sevenzip_listing_free(listing);
+
+        // Two names swapped at once: each new name is free once its item moves away
+        const char *swap[] = { "y.txt", "bx.txt", "bx.txt", "y.txt" };
+        EXPECT(sevenzip_rename(path("wild.zip"), swap, 2, NULL, NULL), SEVENZIP_OK);
+        make_dir("outswap");
+        EXPECT(sevenzip_extract(path("wild.zip"), path("outswap"), NULL, 0, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        size_t n = 0;
+        char *swapped = read_file("outswap/y.txt", &n);
+        CHECK(swapped && n == 1 && swapped[0] == '4', "the names were not swapped\n");
+        free(swapped);
+        const char *empty[] = { "y.txt", "" };
+        EXPECT(sevenzip_rename(path("wild.zip"), empty, 1, NULL, NULL), SEVENZIP_ERR_INVALID_PARAM);
+    }
+
+    // Rename: an item into a folder, a folder with everything under it, and what is refused without writing
+    {
+        SevenZipUpdateOptions o = options("7z");
+        o.solid = 1;
+        EXPECT(sevenzip_update(path("ren.7z"), sources, 2, &o, NULL), SEVENZIP_OK);
+        int progress = 0;
+        SevenZipCallbacks cb = { &progress, count_progress, NULL, NULL };
+        const char *into[] = { "a.txt", "sub/a.txt" };
+        EXPECT(sevenzip_rename(path("ren.7z"), into, 1, NULL, &cb), SEVENZIP_OK);
+        CHECK(progress > 0, "no progress reported while renaming\n");
+        const char *folder[] = { "sub", "docs/sub" };
+        EXPECT(sevenzip_rename(path("ren.7z"), folder, 1, NULL, NULL), SEVENZIP_OK);
+        uint32_t count = 0;
+        SevenZipListing *listing = NULL;
+        EXPECT(listed("ren.7z", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 4 && has_item(listing, "docs/sub") && has_item(listing, "docs/sub/a.txt")
+              && has_item(listing, "docs/sub/b.bin") && has_item(listing, "docs/sub/çalışma ğüş.txt")
+              && !has_item(listing, "a.txt") && !has_item(listing, "sub/b.bin"), "renamed items are not where asked\n");
+        sevenzip_listing_free(listing);
+        make_dir("outren");
+        EXPECT(sevenzip_extract(path("ren.7z"), path("outren"), NULL, 0, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        CHECK(same_file("src/sub/b.bin", "outren/docs/sub/b.bin") && same_file("src/a.txt", "outren/docs/sub/a.txt"),
+              "renamed items lost their data\n");
+
+        struct stat before, after;
+        stat(path("ren.7z"), &before);
+        const char *missing[] = { "nothing.txt", "x.txt" };
+        EXPECT(sevenzip_rename(path("ren.7z"), missing, 1, NULL, NULL), SEVENZIP_ERR_NOT_FOUND);
+        const char *taken[] = { "docs/sub/a.txt", "docs/sub/b.bin" };
+        EXPECT(sevenzip_rename(path("ren.7z"), taken, 1, NULL, NULL), SEVENZIP_ERR_EXISTS);
+        const char *inside[] = { "docs", "docs/sub/docs" };
+        EXPECT(sevenzip_rename(path("ren.7z"), inside, 1, NULL, NULL), SEVENZIP_ERR_INVALID_PARAM);
+        const char *twice[] = { "docs/sub/a.txt", "c.txt", "docs/sub/b.bin", "c.txt" };
+        EXPECT(sevenzip_rename(path("ren.7z"), twice, 2, NULL, NULL), SEVENZIP_ERR_INVALID_PARAM);
+        const char *throughFile[] = { "docs/sub/a.txt", "docs/sub/b.bin/a.txt" };
+        EXPECT(sevenzip_rename(path("ren.7z"), throughFile, 1, NULL, NULL), SEVENZIP_ERR_EXISTS);
+        const char *shapes[][2] = { { "docs/", "papers" }, { "docs", "papers/" }, { "docs", "/papers" },
+                                    { "docs", "../papers" }, { "docs", "a/./b" }, { "docs", "a//b" } };
+        for (size_t i = 0; i < sizeof shapes / sizeof shapes[0]; i++)
+            EXPECT(sevenzip_rename(path("ren.7z"), shapes[i], 1, NULL, NULL), SEVENZIP_ERR_INVALID_PARAM);
+        SevenZipCallbacks cancel = { NULL, cancel_at_once, NULL, NULL };
+        const char *cancelled[] = { "docs", "papers" };
+        EXPECT(sevenzip_rename(path("ren.7z"), cancelled, 1, NULL, &cancel), SEVENZIP_ERR_CANCELLED);
+        stat(path("ren.7z"), &after);
+        CHECK(before.st_ino == after.st_ino && before.st_size == after.st_size, "a refused rename wrote the archive\n");
+
+        // An item two pairs name: the folder and an item inside it
+        const char *both[] = { "docs", "papers", "docs/sub/a.txt", "papers/a.txt" };
+        EXPECT(sevenzip_rename(path("ren.7z"), both, 2, NULL, NULL), SEVENZIP_ERR_INVALID_PARAM);
+    }
+
+    // A compressed tar and an archive in volumes are not renamed in
+    {
+        const char *into[] = { "a.txt", "sub/a.txt" };
+        EXPECT(sevenzip_rename(path("pack.tar.gz"), into, 1, NULL, NULL), SEVENZIP_ERR_UNSUPPORTED);
+        EXPECT(sevenzip_rename(path("vol.7z.001"), into, 1, NULL, NULL), SEVENZIP_ERR_UNSUPPORTED);
+    }
+
+    // Rename in a 7z archive whose names are encrypted: only with its password
+    {
+        const char *into[] = { "a.txt", "sub/a.txt" };
+        EXPECT(sevenzip_rename(path("secret.7z"), into, 1, NULL, NULL), SEVENZIP_ERR_PASSWORD_REQUIRED);
+        EXPECT(sevenzip_rename(path("secret.7z"), into, 1, "wrong", NULL), SEVENZIP_ERR_WRONG_PASSWORD);
+        EXPECT(sevenzip_rename(path("secret.7z"), into, 1, "sır-parola", NULL), SEVENZIP_OK);
+        SevenZipListing *listing = NULL;
+        EXPECT(listed("secret.7z", NULL, NULL, NULL), SEVENZIP_ERR_PASSWORD_REQUIRED);
+        EXPECT(listed("secret.7z", "sır-parola", NULL, &listing), SEVENZIP_OK);
+        CHECK(has_item(listing, "sub/a.txt") && sevenzip_listing_headers_encrypted(listing),
+              "the renamed archive lost its encrypted names\n");
+        sevenzip_listing_free(listing);
     }
 
     // Failures
