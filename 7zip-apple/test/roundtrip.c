@@ -147,6 +147,36 @@ static void write_windows_zip(const char *name, const char *const *names, const 
     write_file(name, (const char *)zip, (size_t)(p - zip));
 }
 
+/* A tar written by hand: an entry for each name, a folder when it ends in
+   "/", a file holding "x" otherwise; names such as "./a.txt" or "/abs.txt"
+   stay as given, as tar -C dir . and other tools write them. */
+static void write_tar(const char *name, const char *const *names, int count)
+{
+    static char tar[16384];
+    memset(tar, 0, sizeof tar);
+    char *p = tar;
+    for (int i = 0; i < count; i++) {
+        const size_t length = strlen(names[i]);
+        const int folder = names[i][length - 1] == '/';
+        memcpy(p, names[i], length);
+        memcpy(p + 100, folder ? "0000755" : "0000644", 7);
+        memcpy(p + 108, "0000000", 7);
+        memcpy(p + 116, "0000000", 7);
+        snprintf(p + 124, 12, "%011o", folder ? 0 : 1);
+        snprintf(p + 136, 12, "%011o", 1700000000);
+        p[156] = folder ? '5' : '0';
+        memcpy(p + 257, "ustar", 6);
+        memcpy(p + 263, "00", 2);
+        memset(p + 148, ' ', 8);
+        unsigned sum = 0;
+        for (int j = 0; j < 512; j++) sum += (unsigned char)p[j];
+        snprintf(p + 148, 7, "%06o", sum);
+        p += 512;
+        if (!folder) { p[0] = 'x'; p += 512; }
+    }
+    write_file(name, tar, (size_t)(p - tar) + 1024);
+}
+
 static SevenZipUpdateOptions options(const char *format)
 {
     SevenZipUpdateOptions o;
@@ -475,6 +505,76 @@ int main(void)
         CHECK(has_item(listing, "sub/a.txt") && sevenzip_listing_headers_encrypted(listing),
               "the renamed archive lost its encrypted names\n");
         sevenzip_listing_free(listing);
+    }
+
+    // Names and paths as they are written
+    {
+        // An item's whole path: "./a.txt" is not "a.txt", "." is the folder "." alone, ".." names nothing
+        const char *entries[] = { "./", "./a.txt", "./sub/", "./sub/b.txt", "a.txt", "/abs.txt", "abs.txt" };
+        write_tar("dots.tar", entries, 7);
+        uint32_t count = 0;
+        SevenZipListing *listing = NULL;
+        EXPECT(listed("dots.tar", NULL, &count, NULL), SEVENZIP_OK);
+        CHECK(count == 7, "dots.tar lists %u items\n", count);
+        const char *dotted[] = { "./a.txt" };
+        EXPECT(sevenzip_delete(path("dots.tar"), dotted, 1, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("dots.tar", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 6 && has_item(listing, "a.txt") && !has_item(listing, "./a.txt"),
+              "deleting ./a.txt left %u items, a.txt %d\n", count, has_item(listing, "a.txt"));
+        sevenzip_listing_free(listing);
+        const char *up[] = { ".." };
+        EXPECT(sevenzip_delete(path("dots.tar"), up, 1, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("dots.tar", NULL, &count, NULL), SEVENZIP_OK);
+        CHECK(count == 6, "deleting .. left %u items\n", count);
+        const char *absolute[] = { "/abs.txt" };
+        EXPECT(sevenzip_delete(path("dots.tar"), absolute, 1, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("dots.tar", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 5 && has_item(listing, "abs.txt"), "deleting /abs.txt left %u items\n", count);
+        sevenzip_listing_free(listing);
+        const char *dot[] = { "." };
+        EXPECT(sevenzip_delete(path("dots.tar"), dot, 1, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("dots.tar", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 2 && has_item(listing, "a.txt") && has_item(listing, "abs.txt"),
+              "deleting . left %u items\n", count);
+        sevenzip_listing_free(listing);
+
+        // A folder's name still deletes everything under it
+        SevenZipUpdateOptions z = options("zip");
+        EXPECT(sevenzip_update(path("folder.zip"), sources, 2, &z, NULL), SEVENZIP_OK);
+        const char *folder[] = { "sub" };
+        EXPECT(sevenzip_delete(path("folder.zip"), folder, 1, NULL, false, NULL), SEVENZIP_OK);
+        EXPECT(listed("folder.zip", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 1 && has_item(listing, "a.txt"), "deleting sub left %u items\n", count);
+        sevenzip_listing_free(listing);
+
+        // A "*" in the destination stays
+        make_dir("dst*star");
+        EXPECT(sevenzip_extract(path("folder.zip"), path("dst*star"), NULL, 0, SEVENZIP_OVERWRITE, NULL, NULL), SEVENZIP_OK);
+        CHECK(exists("dst*star/a.txt"), "the destination's * was replaced\n");
+
+        // An archive without an extension is the file named, never one with an extension added
+        EXPECT(sevenzip_update(path("noext"), sources, 2, &z, NULL), SEVENZIP_OK);
+        CHECK(exists("noext") && !exists("noext.zip"), "the archive was written under another name\n");
+        const char *one[] = { "a.txt" };
+        EXPECT(sevenzip_delete(path("noext"), one, 1, NULL, false, NULL), SEVENZIP_OK);
+        const char *move[] = { "sub", "moved" };
+        EXPECT(sevenzip_rename(path("noext"), move, 1, NULL, NULL), SEVENZIP_OK);
+        EXPECT(listed("noext", NULL, &count, &listing), SEVENZIP_OK);
+        CHECK(count == 3 && has_item(listing, "moved/b.bin") && !has_item(listing, "a.txt"),
+              "noext was not the archive changed: %u items\n", count);
+        sevenzip_listing_free(listing);
+        CHECK(!exists("noext.zip") && !exists("noext.7z"), "a change wrote another archive\n");
+
+        // A missing name is refused, never read as "everything"
+        const char *missing[] = { NULL };
+        EXPECT(sevenzip_delete(path("folder.zip"), missing, 1, NULL, false, NULL), SEVENZIP_ERR_INVALID_PARAM);
+        EXPECT(listed("folder.zip", NULL, &count, NULL), SEVENZIP_OK);
+        CHECK(count == 1, "a missing name deleted items\n");
+        EXPECT(sevenzip_update(path("folder.zip"), missing, 1, &z, NULL), SEVENZIP_ERR_INVALID_PARAM);
+        make_dir("outmissing");
+        EXPECT(sevenzip_extract(path("folder.zip"), path("outmissing"), missing, 1, SEVENZIP_OVERWRITE, NULL, NULL),
+               SEVENZIP_ERR_INVALID_PARAM);
+        CHECK(!exists("outmissing/a.txt"), "a missing name extracted everything\n");
     }
 
     // Failures

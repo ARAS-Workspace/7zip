@@ -16,8 +16,12 @@
  * password never appears in any process's argument list.
  *
  * Every call is synchronous; run it off the main thread. Strings are UTF-8,
- * paths are absolute. Names are matched as they are written (7zz -spd):
- * "*" and "?" are characters of a name, never wildcards.
+ * paths are absolute. Names and paths are taken as they are written: "*"
+ * and "?" are characters of a name, never wildcards (7zz -spd); a name
+ * inside an archive is its whole path, "./a.txt" is not "a.txt" (-spf); a
+ * "*" in a destination stays (-spod); an archive is the file named, with or
+ * without an extension (-sae). A NULL among the names is refused with
+ * SEVENZIP_ERR_INVALID_PARAM.
  */
 
 #ifdef __cplusplus

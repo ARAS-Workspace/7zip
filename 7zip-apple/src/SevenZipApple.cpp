@@ -140,13 +140,18 @@ static void AddPassword(UStringVector &switches, const char *password)
         switches.Add(UString(L"-p") + Wide(password));
 }
 
+// A missing name is refused: left out, a list of nothing but missing names became 7-Zip's "everything" ("*"),
+// which deleted every item.
 static void AddNames(UStringVector &switches, const char *archive, const char *const *names, size_t count)
 {
     switches.Add(L"--");
     switches.Add(Wide(archive));
     for (size_t i = 0; i < count; i++)
-        if (names[i])
-            switches.Add(Wide(names[i]));
+    {
+        if (!names[i])
+            throw CArcCmdLineException("A name is missing");
+        switches.Add(Wide(names[i]));
+    }
 }
 
 static HRESULT ExtractWith(CReporter &reporter, bool test, const UString &archive, const UString &destination,
@@ -170,6 +175,11 @@ static HRESULT ExtractWith(CReporter &reporter, bool test, const UString &archiv
     switches.Add(L"-spd");
     if (!test)
     {
+        // The destination is taken as written too: 7-Zip put the archive's name in place of a "*" in it
+        switches.Add(L"-spod");
+    }
+    if (!test)
+    {
         switches.Add(mode);
         switches.Add(UString(L"-o") + destination);
     }
@@ -177,8 +187,11 @@ static HRESULT ExtractWith(CReporter &reporter, bool test, const UString &archiv
     switches.Add(L"--");
     switches.Add(archive);
     for (size_t i = 0; items && i < itemCount; i++)
-        if (items[i])
-            switches.Add(Wide(items[i]));
+    {
+        if (!items[i])
+            throw CArcCmdLineException("A name is missing");
+        switches.Add(Wide(items[i]));
+    }
 
     CSession session(switches);
     CArcCmdLineOptions &options = session.Options;
@@ -617,6 +630,8 @@ int32_t sevenzip_update(const char *archive, const char *const *sources, size_t 
         switches.Add(L"a");
         switches.Add(L"-y");
         switches.Add(L"-spd");
+        // The archive is the file named, with or without an extension: 7-Zip added one and wrote another file
+        switches.Add(L"-sae");
         switches.Add(UString(L"-t") + Wide(options->format));
         if (options->level >= 0)
         {
@@ -655,6 +670,10 @@ int32_t sevenzip_delete(const char *archive, const char *const *items, size_t it
         switches.Add(L"d");
         switches.Add(L"-y");
         switches.Add(L"-spd");
+        switches.Add(L"-sae");
+        // Each name is the whole path of an item: without -spf a name with a "." or ".." part, or one starting with
+        // "/", lost its first parts, so "./a.txt" deleted "a.txt" and "." or ".." deleted every item
+        switches.Add(L"-spf");
         AddPassword(switches, password);
         if (password && encrypt_headers)
             switches.Add(L"-mhe=on");
@@ -766,6 +785,7 @@ int32_t sevenzip_rename(const char *archive, const char *const *pairs, size_t pa
         switches.Add(L"rn");
         switches.Add(L"-y");
         switches.Add(L"-spd");
+        switches.Add(L"-sae");
         AddNames(switches, archive, pairs, 2 * pair_count);
         return RunUpdate(switches, password, callbacks);
     });
