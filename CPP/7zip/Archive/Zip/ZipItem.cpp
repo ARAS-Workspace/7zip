@@ -1,4 +1,7 @@
 // Archive/ZipItem.cpp
+// Changed by ARAS-Workspace (https://github.com/ARAS-Workspace/7zip) from 7-Zip 26.04:
+//   2026-10-13: On Apple systems, a name stored in a Windows code page is read with the
+//               code page the library was given for it (CodePageToUnicodeString).
 
 #include "StdAfx.h"
 

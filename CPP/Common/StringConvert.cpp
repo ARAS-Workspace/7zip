@@ -1,4 +1,8 @@
 // Common/StringConvert.cpp
+// Changed by ARAS-Workspace (https://github.com/ARAS-Workspace/7zip) from 7-Zip 26.04:
+//   2026-10-13: On Apple systems, CodePageToUnicodeString() reads a string stored in a
+//               Windows code page through CoreFoundation, with g_OemCodePage and
+//               g_AnsiCodePage standing for the OEM and ANSI code pages.
 
 #include "StdAfx.h"
 
