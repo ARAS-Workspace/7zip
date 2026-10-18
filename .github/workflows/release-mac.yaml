@@ -57,7 +57,9 @@ jobs:
           cp "7zip-apple/build/universal/${LIB_NAME}" stage/
           cp "7zip-apple/include/${HEADER}" stage/include/
           cp DOC/License.txt stage/LICENSE
-          (cd stage && shasum -a 256 "${LIB_NAME}" > CHECKSUM.sha256)
+          # The full GNU LGPL 2.1 that LICENSE refers to goes with the library (LGPL 2.1 section 1)
+          cp DOC/copying.txt stage/copying.txt
+          (cd stage && shasum -a 256 "${LIB_NAME}" LICENSE copying.txt > CHECKSUM.sha256)
           tar -czf "release/7zip-apple_${VERSION}_macos_universal.tar.gz" -C stage .
           (cd release && shasum -a 256 ./*.tar.gz > checksums.txt)
           ls -lh release/
