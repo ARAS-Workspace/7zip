@@ -42,6 +42,18 @@ git -C "$W/apple" push origin apple
 
 Then build and test on `apple` (`7zip-apple/build.sh`) before releasing.
 
+## Changes to 7-Zip's own files
+
+7-Zip is under the GNU LGPL 2.1, whose section 2(b) asks that a changed file carry a prominent notice of the change and its date. Every file of 7-Zip this fork changes says so under its first line, one dated line per change:
+
+```
+// Common/StringConvert.cpp
+// Changed by ARAS-Workspace (https://github.com/ARAS-Workspace/7zip) from 7-Zip 26.04:
+//   2026-10-13: On Apple systems, CodePageToUnicodeString() reads ...
+```
+
+The files changed so far: `CPP/7zip/Archive/Zip/ZipItem.cpp`, `CPP/Common/StringConvert.cpp`, `CPP/Common/StringConvert.h`. When an upstream release is taken, check that each notice survived the cherry-pick and that its "from 7-Zip" names the new release. The release archive carries `DOC/License.txt` as `LICENSE` and the full LGPL text as `copying.txt`.
+
 ## Release
 
 ```bash

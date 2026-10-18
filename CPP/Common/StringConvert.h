@@ -1,4 +1,7 @@
 // Common/StringConvert.h
+// Changed by ARAS-Workspace (https://github.com/ARAS-Workspace/7zip) from 7-Zip 26.04:
+//   2026-10-13: On Apple systems, declares g_OemCodePage, g_AnsiCodePage and
+//               CodePageToUnicodeString().
 
 #ifndef ZIP7_INC_COMMON_STRING_CONVERT_H
 #define ZIP7_INC_COMMON_STRING_CONVERT_H
